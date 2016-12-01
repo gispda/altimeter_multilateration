@@ -1,24 +1,28 @@
 #!/usr/bin/python
-import math
-import numpy
+from __future__ import division, print_function
+from numpy import radians,degrees,cos,sin,sqrt,arctan2
+from numpy import array,linalg
 from scipy.ndimage import map_coordinates
 
-#functions for multilateration.
-#this library is more or less based around the so-called "GPS equation", the canonical
-#iterative method for getting position from GPS satellite time difference of arrival data.
-#here, instead of multiple orbiting satellites with known time reference and position,
-#we have multiple fixed stations with known time references (GPSDO, hopefully) and known
-#locations (again, GPSDO).
+"""
+functions for multilateration.
+this library is more or less based around the so-called "GPS equation", the canonical
+iterative method for getting position from GPS satellite time difference of arrival (TDOA) data.
+here, instead of multiple orbiting satellites with known time reference and position,
+we have multiple fixed stations with known time references (GPSDO, hopefully) and
+known locations (again, GPSDO).
 
-#NB: because of the way this solver works, at least 3 stations and timestamps
-#are required. this function will not return hyperbolae for underconstrained systems.
-#TODO: get HDOP out of this so we can draw circles of likely position and indicate constraint
-########################END NOTES#######################################
-
-
-#this is a 10x10-degree WGS84 geoid datum, in meters relative to the WGS84 reference ellipsoid. given the maximum slope, you should probably interpolate.
-#NIMA suggests a 2x2 interpolation using four neighbors. we'll go cubic spline JUST BECAUSE WE CAN
-wgs84_geoid = numpy.array([[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],                       #90N
+NB: because of the way this solver works, at least 3 stations and timestamps
+are required. this function will not return hyperbolae for underconstrained systems.
+TODO: get HDOP out of this so we can draw circles of likely position and indicate constraint
+"""
+"""
+this is a 10x10-degree WGS84 geoid datum, in meters relative to the WGS84 reference ellipsoid.
+given the maximum slope, you should probably interpolate.
+NIMA suggests a 2x2 interpolation using four neighbors.
+"""
+wgs84_geoid = array(
+              [[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13],                       #90N
                [3,1,-2,-3,-3,-3,-1,3,1,5,9,11,19,27,31,34,33,34,33,34,28,23,17,13,9,4,4,1,-2,-2,0,2,3,2,1,1],                                       #80N
                [2,2,1,-1,-3,-7,-14,-24,-27,-25,-19,3,24,37,47,60,61,58,51,43,29,20,12,5,-2,-10,-14,-12,-10,-14,-12,-6,-2,3,6,4],                    #70N
                [2,9,17,10,13,1,-14,-30,-39,-46,-42,-21,6,29,49,65,60,57,47,41,21,18,14,7,-3,-22,-29,-32,-32,-26,-15,-2,13,17,19,6],                 #60N
@@ -37,14 +41,14 @@ wgs84_geoid = numpy.array([[13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,1
                [-61,-60,-61,-55,-49,-44,-38,-31,-25,-16,-6,1,4,5,4,2,6,12,16,16,17,21,20,26,26,22,16,10,-1,-16,-29,-36,-46,-55,-54,-59],            #70S
                [-53,-54,-55,-52,-48,-42,-38,-38,-29,-26,-26,-24,-23,-21,-19,-16,-12,-8,-4,-1,1,4,4,6,5,4,2,-6,-15,-24,-33,-40,-48,-50,-53,-52],     #80S
                [-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30,-30]], #90S
-               dtype=numpy.float)
+               dtype=float)
 
 #ok this calculates the geoid offset from the reference ellipsoid
 #combined with LLH->ECEF this gets you XYZ for a ground-referenced point
 def wgs84_height(lat, lon):
-    yi = numpy.array([9-lat/10.0])
-    xi = numpy.array([18+lon/10.0])
-    return float(map_coordinates(wgs84_geoid, [yi, xi]))
+    yi = array([9 -  lat/10.])
+    xi = array([18 + lon/10.])
+    return map_coordinates(wgs84_geoid, [yi, xi])
 
 #WGS84 reference ellipsoid constants
 wgs84_a = 6378137.0
@@ -55,71 +59,78 @@ wgs84_b2 = wgs84_b**2
 
 #convert ECEF to lat/lon/alt without geoid correction
 #returns alt in meters
-def ecef2llh((x,y,z)):
-    ep  = math.sqrt((wgs84_a2 - wgs84_b2) / wgs84_b2)
-    p   = math.sqrt(x**2+y**2)
-    th  = math.atan2(wgs84_a*z, wgs84_b*p)
-    lon = math.atan2(y, x)
-    lat = math.atan2(z+ep**2*wgs84_b*math.sin(th)**3, p-wgs84_e2*wgs84_a*math.cos(th)**3)
-    N   = wgs84_a / math.sqrt(1-wgs84_e2*math.sin(lat)**2)
-    alt = p / math.cos(lat) - N
+def ecef2llh(xyz):
+    x,y,z=xyz
+    ep  = sqrt((wgs84_a2 - wgs84_b2) / wgs84_b2)
+    p   = sqrt(x**2+y**2)
+    th  = arctan2(wgs84_a*z, wgs84_b*p)
+    lon = arctan2(y, x)
+    lat = arctan2(z+ep**2*wgs84_b* sin(th)**3, p-wgs84_e2*wgs84_a* cos(th)**3)
+    N   = wgs84_a / sqrt(1-wgs84_e2* sin(lat)**2)
+    alt = p / cos(lat) - N
 
-    lon *= (180. / math.pi)
-    lat *= (180. / math.pi)
+    lon = degrees(lon)
+    lat = degrees(lat)
 
-    return [lat, lon, alt]
+    return array((lat, lon, alt)).squeeze()
 
 #convert lat/lon/alt coords to ECEF without geoid correction, WGS84 model
 #remember that alt is in meters
-def llh2ecef((lat, lon, alt)):
-    lat *= (math.pi / 180.0)
-    lon *= (math.pi / 180.0)
+def llh2ecef(lla):
+    lat,lon,alt = lla
+    lat = radians(lat)
+    lon = radians(lon)
 
-    n = lambda x: wgs84_a / math.sqrt(1 - wgs84_e2*(math.sin(x)**2))
+    n = lambda x: wgs84_a / sqrt(1 - wgs84_e2*(sin(x)**2))
 
-    x = (n(lat) + alt)*math.cos(lat)*math.cos(lon)
-    y = (n(lat) + alt)*math.cos(lat)*math.sin(lon)
-    z = (n(lat)*(1-wgs84_e2)+alt)*math.sin(lat)
+    x = (n(lat) + alt)* cos(lat)* cos(lon)
+    y = (n(lat) + alt)* cos(lat)* sin(lon)
+    z = (n(lat)*(1-wgs84_e2)+alt)* sin(lat)
 
-    return [x,y,z]
+    return array((x,y,z)).squeeze()
 
 #do both of the above to get a geoid-corrected x,y,z position
-def llh2geoid((lat, lon, alt)):
+def llh2geoid(lla):
+    lat,lon,alt=lla
     (x,y,z) = llh2ecef((lat, lon, alt + wgs84_height(lat, lon)))
-    return [x,y,z]
+    return array((x,y,z)).squeeze()
 
 
-c = 299792458 / 1.0003 #modified for refractive index of air, why not
+c = 299792458 / 1.0003 #modified for refractive index of air
 
-#this function is the iterative solver core of the mlat function below
-#we use limit as a goal to stop solving when we get "close enough" (error magnitude in meters for that iteration)
-#basically 20 meters is way less than the anticipated error of the system so it doesn't make sense to continue
-#it's possible this could fail in situations where the solution converges slowly
-#TODO: this fails to converge for some seriously advantageous geometry
 def mlat_iter(rel_stations, prange_obs, xguess = [0,0,0], limit = 20, maxrounds = 100):
+    """
+    this function is the iterative solver core of the mlat function below
+    we use limit as a goal to stop solving when we get "close enough" (error magnitude in meters for that iteration)
+    basically 20 meters is way less than the anticipated error of the GPS system so it doesn't make sense to continue
+    it's possible this could fail in situations where the solution converges slowly
+    TODO: this fails to converge for some seriously advantageous geometry
+    """
     xerr = [1e9, 1e9, 1e9]
     rounds = 0
-    while numpy.linalg.norm(xerr) > limit:
-        prange_est = [[numpy.linalg.norm(station - xguess)] for station in rel_stations]
+    while linalg.norm(xerr) > limit:
+        prange_est = [[linalg.norm(station - xguess)] for station in rel_stations]
         dphat = prange_obs - prange_est
-        H = numpy.array([(numpy.array(-rel_stations[row,:])+xguess) / prange_est[row] for row in range(0,len(rel_stations))])
+        H = array([(array(-rel_stations[row,:])+xguess) / prange_est[row] for row in range(0,len(rel_stations))])
         #now we have H, the Jacobian, and can solve for residual error
-        xerr = numpy.linalg.lstsq(H, dphat)[0].flatten()
+        xerr = linalg.lstsq(H, dphat)[0].flatten()
         xguess += xerr
         #print xguess, xerr
         rounds += 1
         if rounds > maxrounds:
             raise Exception("Failed to converge!")
-            break
+
     return xguess
 
-#func mlat:
-#uses a modified GPS pseudorange solver to locate aircraft by multilateration.
-#replies is a list of reports, in ([lat, lon, alt], timestamp) format
-#altitude is the barometric altitude of the aircraft as returned by the aircraft
-#returns the estimated position of the aircraft in (lat, lon, alt) geoid-corrected WGS84.
-#let's make it take a list of tuples so we can sort by them
+
 def mlat(replies, altitude):
+    """
+    uses a modified GPS pseudorange solver to locate aircraft by multilateration.
+    replies is a list of reports, in ([lat, lon, alt], timestamp) format
+    altitude is the barometric altitude of the aircraft as returned by the aircraft
+    returns the estimated position of the aircraft in (lat, lon, alt) geoid-corrected WGS84.
+    let's make it take a list of tuples so we can sort by them
+    """
     sorted_replies = sorted(replies, key=lambda time: time[1])
 
     stations = [sorted_reply[0] for sorted_reply in sorted_replies]
@@ -130,70 +141,73 @@ def mlat(replies, altitude):
 
 
     #list of stations in XYZ relative to me
-    rel_stations = [numpy.array(llh2geoid(station)) - numpy.array(me) for station in stations[1:]]
-    rel_stations.append([0,0,0] - numpy.array(me))
-    rel_stations = numpy.array(rel_stations) #convert list of arrays to 2d array
+    rel_stations = [llh2geoid(station) - me for station in stations[1:]]
+    rel_stations.append(array([0,0,0]) - me)
+    rel_stations = array(rel_stations) #convert list of arrays to 2d array
 
-    #differentiate the timestamps to get TDOA, multiply by c to get pseudorange
+#%% differentiate the timestamps to get TDOA, multiply by c to get pseudorange
     prange_obs = [[c*(stamp-timestamps[0])] for stamp in timestamps[1:]]
-
-    #so here we calc the estimated pseudorange to the center of the earth, using station[0] as a reference point for the geoid
-    #in other words, we say "if the aircraft were directly overhead of station[0], this is the prange to the center of the earth"
-    #this is a necessary approximation since we don't know the location of the aircraft yet
-    #if the dang earth were actually round this wouldn't be an issue
-    prange_obs.append( [numpy.linalg.norm(llh2ecef((me_llh[0], me_llh[1], altitude)))] ) #use ECEF not geoid since alt is MSL not GPS
-    prange_obs = numpy.array(prange_obs)
+#%% geocentric psuedorange
+    """
+    calc the estimated pseudorange to the center of the earth, using station[0] as a reference point for the geoid
+    in other words, we say "if the aircraft were directly overhead of station[0], this is the prange to the center of the earth"
+    this is a necessary approximation since we don't know the location of the aircraft yet
+    """
+    prange_obs.append( [linalg.norm(llh2ecef((me_llh[0], me_llh[1], altitude)))] ) #use ECEF not geoid since alt is MSL not GPS
+    prange_obs = array(prange_obs)
 
     #xguess = llh2ecef([37.617175,-122.400843, 8000])-numpy.array(me)
-    #xguess = [0,0,0]
-    #start our guess directly overhead, who cares
-    xguess = numpy.array(llh2ecef([me_llh[0], me_llh[1], altitude])) - numpy.array(me)
+    #xguess = [0,0,0]    #start our guess directly overhead
+    xguess = array(llh2ecef([me_llh[0], me_llh[1], altitude])) - array(me)
 
     xyzpos = mlat_iter(rel_stations, prange_obs, xguess)
     llhpos = ecef2llh(xyzpos+me)
-
-    #now, we could return llhpos right now and be done with it.
-    #but the assumption we made above, namely that the aircraft is directly above the
-    #nearest station, results in significant error due to the oblateness of the Earth's geometry.
-    #so now we solve AGAIN, but this time with the corrected pseudorange of the aircraft altitude
-    #this might not be really useful in practice but the sim shows >50m errors without it
-    #and <4cm errors with it, not that we'll get that close in reality but hey let's do it right
-    prange_obs[-1] = [numpy.linalg.norm(llh2ecef((llhpos[0], llhpos[1], altitude)))]
+#%% ellipsoid correction
+    """
+    this estimate has significant error due to the oblateness of the Earth's geometry.
+    so now we solve again, but this time with the corrected pseudorange of the aircraft altitude
+    the sim shows > 50m errors without it
+    and < 4cm errors with it
+    """
+    prange_obs[-1] = [linalg.norm(llh2ecef((llhpos[0], llhpos[1], altitude)))]
     xyzpos_corr = mlat_iter(rel_stations, prange_obs, xyzpos) #start off with a really close guess
     llhpos = ecef2llh(xyzpos_corr+me)
 
-    #and now, what the hell, let's try to get dilution of precision data
-    #avec is the unit vector of relative ranges to the aircraft from each of the stations
+#%% dilution of precision data
+    """
+    avec is the unit vector of relative ranges to the aircraft from each of the stations
+    the diagonal elements of doparray will be the x, y, z DOPs.
+    """
 #    for i in range(len(avec)):
-#        avec[i] = numpy.array(avec[i]) / numpy.linalg.norm(numpy.array(avec[i]))
+#        avec[i] = array(avec[i]) / linalg.norm(numpy.array(avec[i]))
 #    numpy.append(avec, [[-1],[-1],[-1],[-1]], 1) #must be # of stations
-#    doparray = numpy.linalg.inv(avec.T*avec)
-#the diagonal elements of doparray will be the x, y, z DOPs.
+#    doparray = linalg.inv(avec.T*avec)
+
 
     return llhpos
 
 
 if __name__ == '__main__':
-    #here's some test data to validate the algorithm
-    teststations = [[37.76225, -122.44254, 100], [37.680016,-121.772461, 100], [37.385844,-122.083082, 100], [37.701207,-122.309418, 100]]
-    testalt      = 8000
-    testplane    = numpy.array(llh2ecef([37.617175,-122.400843, testalt]))
-    testme       = llh2geoid(teststations[0])
-    teststamps   = [10,
-                    10 + numpy.linalg.norm(testplane-numpy.array(llh2geoid(teststations[1]))) / c,
-                    10 + numpy.linalg.norm(testplane-numpy.array(llh2geoid(teststations[2]))) / c,
-                    10 + numpy.linalg.norm(testplane-numpy.array(llh2geoid(teststations[3]))) / c,
+    obsloc = [[37.76225, -122.44254, 100],
+              [37.680016,-121.772461, 100],
+              [37.385844,-122.083082, 100],
+              [37.701207,-122.309418, 100]]
+
+    targloc    = llh2ecef((37.617175,-122.400843, 200e3))  # [lat,lon,alt_m]
+
+    tdelay   = [10,
+                    10 + linalg.norm(targloc-llh2geoid(obsloc[1])) / c,
+                    10 + linalg.norm(targloc-llh2geoid(obsloc[2])) / c,
+                    10 + linalg.norm(targloc-llh2geoid(obsloc[3])) / c,
                 ]
 
-    print teststamps
 
     replies = []
-    for i in range(0, len(teststations)):
-        replies.append((teststations[i], teststamps[i]))
-    ans = mlat(replies, testalt)
-    error = numpy.linalg.norm(numpy.array(llh2ecef(ans))-numpy.array(testplane))
-    range = numpy.linalg.norm(llh2geoid(ans)-numpy.array(testme))
-    print testplane-testme
-    print ans
-    print "Error: %.2fm" % (error)
-    print "Range: %.2fkm (from first station in list)" % (range/1000)
+    for o,t in zip(obsloc, tdelay):
+        replies.append((o, t))
+
+    ans = mlat(replies, targloc[2])
+
+    error = linalg.norm(llh2ecef(ans)- targloc)
+
+    print("Estimation Error magnitude: {:.2f} m".format(error))
